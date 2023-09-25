@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <SPIFFS.h>
 #include <AccelStepper.h>
-//#include <ESP32Encoder.h>
+#include <ESP32Encoder.h>
 #include <ArduinoJson.h>
 
 //#include "LM335.h"
@@ -33,13 +33,15 @@ const int stepMode2    = 14;
 const int stepMode1    = 12;
 const int enablePin    = 13;
 
-const int encoderPin1  = 2;
-const int encoderPin2  = 15;
+const int encoderPin1  = 4;
+const int encoderPin2  = 0;
 
 #define RXD2 16
 #define TXD2 17
 
-const int encoderMotorstepsRelation = 5;
+#define ULN2003_MULTIPLIER 4// Factor 4 for ULN2003
+
+const int encoderMotorstepsRelation = 1;
 
 //const int temperatureSensorPin = 3;
 
@@ -48,7 +50,7 @@ unsigned long displayTimestamp;
 
 //LM335 TemperatureSensor(temperatureSensorPin);
 Moonlite SerialProtocol;
-//ESP32Encoder encoder;
+ESP32Encoder encoder;
 
 // multiplier of SPEEDMUX, currently max speed is 480.
 int speedFactor = 16;
@@ -125,12 +127,12 @@ void processCommand()
       break;
     case ML_GN:
       // Get the target position
-      SerialProtocol.setAnswer(4, targetPosition / 4);  // Factor 4 for ULN2003
+      SerialProtocol.setAnswer(4, targetPosition / ULN2003_MULTIPLIER);  // Factor 4 for ULN2003
       break;
     case ML_GP:
       // Return the current position
       currentPosition = stepper.currentPosition();
-      SerialProtocol.setAnswer(4, currentPosition / 4); // Factor 4 for ULN2003
+      SerialProtocol.setAnswer(4, currentPosition / ULN2003_MULTIPLIER); // Factor 4 for ULN2003
       break;
     case ML_GT:
       // Return the temperature
@@ -188,13 +190,13 @@ void processCommand()
       break;
     case ML_SN:
       // Set the target position
-//      encoder.setCount(SerialProtocol.getCommand().parameter * encoderMotorstepsRelation);
-      targetPosition = 4 * SerialProtocol.getCommand().parameter; // Factor 4 for ULN2003
+      encoder.setCount(SerialProtocol.getCommand().parameter * encoderMotorstepsRelation);
+      targetPosition = ULN2003_MULTIPLIER * SerialProtocol.getCommand().parameter; // Factor 4 for ULN2003
       break;
     case ML_SP:
       // Set the current motor position
-//      encoder.setCount(SerialProtocol.getCommand().parameter * encoderMotorstepsRelation);
-      currentPosition = 4 * SerialProtocol.getCommand().parameter; // Factor 4 for ULN2003
+      encoder.setCount(SerialProtocol.getCommand().parameter * encoderMotorstepsRelation);
+      currentPosition = ULN2003_MULTIPLIER * SerialProtocol.getCommand().parameter; // Factor 4 for ULN2003
       stepper.setCurrentPosition(currentPosition);
       break;
     case ML_PLUS:
@@ -214,7 +216,6 @@ void processCommand()
   }
 }
 
-/*
 void SetupEncoder()
 {
   delay(1);
@@ -224,8 +225,10 @@ void SetupEncoder()
 	encoder.clearCount();
   // Attach pins for use as encoder pins
 	encoder.attachSingleEdge(encoderPin1, encoderPin2);
+
+  encoder.setFilter(1023);
 }
-*/
+
 
 void loadConfiguration(const char *filename) {
   // Open file for reading
@@ -278,8 +281,8 @@ void saveConfiguration(const char *filename) {
 
 void setup()
 {
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LOW);
+//  pinMode(LED_BUILTIN, OUTPUT);
+//  digitalWrite(LED_BUILTIN, LOW);
   SerialProtocol.init(9600);
   // Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2);
   // Serial2.println("Begin debugging");
@@ -302,31 +305,23 @@ void setup()
   //displayTimestamp = millis();
   millisLastMove = millis();
 
-//  SetupEncoder();
+  SetupEncoder();
+  // set starting count value to lastSavedPosition
+  encoder.setCount(lastSavedPosition / ULN2003_MULTIPLIER * encoderMotorstepsRelation);// Factor 4 for ULN2003
 }
-
 
 void HandleHandController()
 {
-/*  long targetPosition = Motor.getTargetPosition();
-  long encoderPosition = encoder.getCount() / encoderMotorstepsRelation;
-//  Motor.setTargetPosition(encoderPosition);
+  long encoderPosition = ULN2003_MULTIPLIER * encoder.getCount() / encoderMotorstepsRelation; // Factor 4 for ULN2003
   if(targetPosition != encoderPosition)
   {
-//    Motor.goToTargetPosition();
+    // Goto target position
+    stepper.enableOutputs();
+    isEnabled = true;
+    targetPosition = encoderPosition;
     stepper.moveTo(targetPosition);
   }
-  if (!Motor.isInMove())
-  {
-//    Motor.goToTargetPosition();
-    stepper.moveTo(targetPosition);
-  }
-  while(Motor.isInMove())
-  {
-    Motor.Manage();
-  }*/
 }
-
 
 void loop()
 {
@@ -340,20 +335,7 @@ void loop()
     timestamp = millis();
   }
 
-/*  if (!Motor.isInMove())
-  {
-    //TemperatureSensor.Manage();
-    if (Motor.isTemperatureCompensationEnabled() && ((millis() - timestamp) > 30000))
-    {
-     // Motor.setCurrentTemperature(TemperatureSensor.getTemperature());
-      Motor.setCurrentTemperature(20);
-      Motor.compensateTemperature();
-      timestamp = millis();
-    }
-  }*/
-
-//  HandleHandController();
-
+  HandleHandController();
 
   SerialProtocol.Manage();
 
