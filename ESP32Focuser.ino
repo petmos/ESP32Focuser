@@ -70,6 +70,9 @@ const int encoderPin2  = 0;
 
 const int encoderMotorstepsRelation = 5;
 
+// moonlite allows only 65565 steps (16bit)
+const int multiplierMotorsteps = 5;
+
 //const int temperatureSensorPin = 3;
 
 unsigned long timestamp;
@@ -159,11 +162,11 @@ void processCommand()
       break;
     case ML_GN:
       // Get the target position
-      SerialProtocol.setAnswer(4, (long)(Motor.getTargetPosition()));
+      SerialProtocol.setAnswer(4, (long)(Motor.getTargetPosition() / multiplierMotorsteps));
       break;
     case ML_GP:
       // Return the current position
-      SerialProtocol.setAnswer(4, (long)(Motor.getCurrentPosition()));
+      SerialProtocol.setAnswer(4, (long)(Motor.getCurrentPosition() / multiplierMotorsteps));
       break;
     case ML_GT:
       // Return the temperature
@@ -216,12 +219,12 @@ void processCommand()
     case ML_SN:
       // Set the target position
 //      encoder.setCount(SerialProtocol.getCommand().parameter * encoderMotorstepsRelation);
-      Motor.setTargetPosition(SerialProtocol.getCommand().parameter);
+      Motor.setTargetPosition(SerialProtocol.getCommand().parameter * multiplierMotorsteps);
       break;
     case ML_SP:
       // Set the current motor position
 //      encoder.setCount(SerialProtocol.getCommand().parameter * encoderMotorstepsRelation);
-      Motor.setCurrentPosition(SerialProtocol.getCommand().parameter);
+      Motor.setCurrentPosition(SerialProtocol.getCommand().parameter * multiplierMotorsteps);
       break;
     case ML_PLUS:
       // Activate temperature compensation focusing
