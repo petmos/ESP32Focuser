@@ -1,26 +1,72 @@
 #include <Arduino.h>
 //#include "LM335.h"
-#include "Moonlite.h"
-#include "StepperControl.h"
+#include "Moonlite/Moonlite.h"
+#include "StepperControl/StepperControl.h"
 #include <ESP32Encoder.h>
+#include <SPIFFS.h>
+#include <ArduinoJson.h>
 
 //#include <U8x8lib.h>
 //#include <U8g2lib.h>
 
-const int directionPin = 32;
-const int stepPin      = 33;
-const int sleepPin     = 25;
-const int resetPin     = 26;
-const int stepMode3    = 27;
-const int stepMode2    = 14;
-const int stepMode1    = 12;
-const int enablePin    = 13;
+// Our configuration structure.
+//
+// Never use a JsonDocument to store the configuration!
+// A JsonDocument is *not* a permanent storage; it's only a temporary storage
+// used during the serialization phase. See:
+// https://arduinojson.org/v6/faq/why-must-i-create-a-separate-config-object/
+struct Config {
+  long lastSavedPosition;
+};
 
+const char *filename = "/config.dat";  // <- SD library uses 8.3 filenames
+//Config config;                         // <- global configuration object
+
+/* You only need to format SPIFFS the first time */
+#define FORMAT_SPIFFS_IF_FAILED true
+
+/* Breadboard
+const int stepPin = 0;
+const int directionPin = 2;
+const int stepMode1 = 18;
+const int stepMode2 = 19;
+const int stepMode3 = 25;
+const int enablePin = 27;
+const int sleepPin = 4;
+const int resetPin = 32;
+*/
+
+/* Platine */
+const int stepPin = 0;
+const int directionPin = 2;
+const int sleepPin = 4;
+const int resetPin = 17;
+const int stepMode1 = 18; // Dummy
+const int stepMode2 = 19; // Dummy
+const int stepMode3 = 27;
+const int enablePin = 22;
+
+const int Mode1 = 32;
+const int Mode2 = 25;
+
+/*
+const int directionPin = 27;
+const int stepPin      = 25;
+const int sleepPin     = 32;
+const int resetPin     = 12;
+const int stepMode3    = 4;
+const int stepMode2    = 17;
+const int stepMode1    = 16;
+const int enablePin    = 15;
+*/
+const int encoderPin1  = 6;
+const int encoderPin2  = 7;
+/*
 const int encoderPin1  = 2;
-const int encoderPin2  = 15;
-
-#define RXD2 16
-#define TXD2 17
+const int encoderPin2  = 0;
+*/
+#define RXD2 10
+#define TXD2 09
 
 const int encoderMotorstepsRelation = 5;
 
@@ -46,6 +92,10 @@ ESP32Encoder encoder;
 
 float temp = 0;
 long pos = 0;
+long currentPosition = 0;
+long targetPosition = 0;
+long lastSavedPosition;
+
 bool pageIsRefreshing = false;
 
 hw_timer_t * timer = NULL;
@@ -165,12 +215,12 @@ void processCommand()
       break;
     case ML_SN:
       // Set the target position
-      encoder.setCount(SerialProtocol.getCommand().parameter * encoderMotorstepsRelation);
+//      encoder.setCount(SerialProtocol.getCommand().parameter * encoderMotorstepsRelation);
       Motor.setTargetPosition(SerialProtocol.getCommand().parameter);
       break;
     case ML_SP:
       // Set the current motor position
-      encoder.setCount(SerialProtocol.getCommand().parameter * encoderMotorstepsRelation);
+//      encoder.setCount(SerialProtocol.getCommand().parameter * encoderMotorstepsRelation);
       Motor.setCurrentPosition(SerialProtocol.getCommand().parameter);
       break;
     case ML_PLUS:
@@ -194,11 +244,60 @@ void SetupEncoder()
 {
   delay(1);
   // Enable the weak pull down resistors
-	ESP32Encoder::useInternalWeakPullResistors=UP;
+	ESP32Encoder::useInternalWeakPullResistors = puType::up;
   // set starting count value
 	encoder.clearCount();
   // Attach pins for use as encoder pins
 	encoder.attachSingleEdge(encoderPin1, encoderPin2);
+}
+
+void loadConfiguration(const char *filename) {
+  // Open file for reading
+  File file = SPIFFS.open(filename);
+  if (!file) {
+    //Serial2.println(F("Failed to read file"));
+    return;
+  }
+
+  DynamicJsonDocument doc(512);
+  // Deserialize the JSON document
+  DeserializationError err = deserializeJson(doc, file);
+  if (err) {
+    //Serial2.print(F("deserializeJson() failed: "));
+    //Serial2.println(err.c_str());
+  }
+
+  lastSavedPosition = doc["lastSavedPosition"] | 60000;
+
+  // Close the file
+  file.close();
+}
+
+// Write content to a json file
+void saveConfiguration(const char *filename) {
+  // Open file for writing
+  File file = SPIFFS.open(filename, FILE_WRITE);
+  if (!file) {
+    //Serial2.println(F("Failed to create file"));
+    return;
+  }
+
+  // Allocate a temporary JsonDocument
+  // Don't forget to change the capacity to match your requirements.
+  // Use arduinojson.org/v6/assistant to compute the capacity.
+  // You can use DynamicJsonDocument as well
+  DynamicJsonDocument doc(512);
+
+  // Set the values in the document
+  doc["lastSavedPosition"] = lastSavedPosition;
+
+  // Serialize JSON to file
+  if (serializeJson(doc, file) == 0) {
+    //Serial2.println(F("Failed to write to file"));
+  }
+
+  // Close the file
+  file.close();
 }
 
 void setup()
@@ -211,15 +310,30 @@ void setup()
   //Display.setContrast(0);
   //Display.setFont(u8g2_font_crox4hb_tr);
 
+  if(!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){
+    return;
+  }
+
+  loadConfiguration(filename);
+  currentPosition = lastSavedPosition;
+
+  pinMode(Mode1, OUTPUT);
+  pinMode(Mode2, OUTPUT);
+  digitalWrite(Mode1, HIGH);
+  digitalWrite(Mode2, HIGH);
+  
+
   // Set the motor speed to a valid value for Moonlite
   Motor.setSpeed(7000);
   Motor.setStepMode(SC_32TH_STEP);
   Motor.setMoveMode(SC_MOVEMODE_SMOOTH);
+  Motor.setCurrentPosition(currentPosition);
+
 
   timestamp = millis();
   //displayTimestamp = millis();
 
-  SetupEncoder();
+//  SetupEncoder();
 }
 
 void HandleHandController()
@@ -253,10 +367,17 @@ void loop()
       Motor.compensateTemperature();
       timestamp = millis();
     }
+    // Save current location in EEPROM
+    currentPosition = Motor.getCurrentPosition();
+    if (lastSavedPosition != currentPosition)
+    {
+      lastSavedPosition = currentPosition;
+      saveConfiguration(filename);
+    }
   }
 
 
-  HandleHandController();
+//  HandleHandController();
 
   Motor.Manage();
   SerialProtocol.Manage();
